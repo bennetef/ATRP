@@ -1,0 +1,12 @@
+<?xml version="1.0" ?>
+<robot name="ATRP">
+    <webots>
+        <device reference="gps" type="GPS">
+            <ros>
+                <topicName>/gps</topicName>
+                <alwaysOn>true</alwaysOn>
+            </ros>
+        </device>
+        <plugin type="ATRP_webots_package.ATRP_webots_driver.ATRPDriver" />
+    </webots>
+</robot>
