@@ -119,10 +119,6 @@ def hold_forward():
     # Set GPIO outputs for the relais
     GPIO.output(relay_plus_forward_pin, GPIO.LOW)
     GPIO.output(relay_minus_forward_pin, GPIO.LOW)
-    
-    # Update status for the robot
-    global status
-    status = "forward_" + status.split("_")[1]
 
 def hold_backward():
     """Gets called each tick when commanding backward
@@ -135,10 +131,6 @@ def hold_backward():
     # Set GPIO outputs for the relais
     GPIO.output(relay_plus_backward_pin, GPIO.LOW)
     GPIO.output(relay_minus_backward_pin, GPIO.LOW)
-    
-    # Update status for the robot
-    global status
-    status = "backward_" + status.split("_")[1]
 
 def changeSteering(direction: int, steering_angle: float):
     """Change stepper in one particular directions by given angle
@@ -175,25 +167,6 @@ def changeSteering(direction: int, steering_angle: float):
         GPIO.output(steering_right_pin, GPIO.LOW)
         GPIO.output(steering_left_pin, GPIO.LOW)
 
-def changeMaxSpeed(newMaxSpeedValue):
-    """Constrains max speed
-    
-    Args:
-        newMaxSpeedValue: the new max speed value
-        
-    This method is called to change the max speed so it is constrained to its max and min values
-    """
-    global maxSpeedValue
-
-    # Set the new value
-    maxSpeedValue = newMaxSpeedValue
-
-    # Constrain the new value
-    if maxSpeedValue > 36:
-        maxSpeedValue = 36
-    if maxSpeedValue < 21:
-        maxSpeedValue = 21
-
 def filterSensorAngle(sensorAngle): 
     """This method filters out peaks
 
@@ -211,7 +184,7 @@ def filterSensorAngle(sensorAngle):
         
     return sensorAngle
 
-def main():
+def main(argv: list[str]):
     """Main function of this program
     
     This represents the starting point of the script. 
@@ -260,13 +233,17 @@ def main():
     global speedValue
     global maxSpeedValue
     
-    # Initializing variables
     speedValue = 21 # Lowest speed value
-    maxSpeedValue = 21 # Lowest speed value
 
+    try: 
+        maxSpeedValue = float(argv[1])
+    except ValueError:
+        print("No PWM Value given. Using default value of 25.")
+        maxSpeedValue = 25
+        
     # Start PWM signal
     pwmSignal = GPIO.PWM(da_converter_throttle_pin, 100)
-    pwmSignal.start(speedValue) # The speed value corresponds to the duty cycle of the PWM signal
+    pwmSignal.start(maxSpeedValue) # The speed value corresponds to the duty cycle of the PWM signal
 
     # Accept first connections in outer loop
     while True:
@@ -320,6 +297,24 @@ def main():
             # Convert percentage to degrees            
             sensorAngleDegrees = 120 + (sensorAngle / 100 * 13)
 
+            """Response to client
+            
+            After each cycle of the loop, the vehicle sends data to the client.
+            The status and other information is send via the TCP connection.
+            Not used information is just as placeholder.
+            """
+            clientSocket.send(bytes(status + "|" + 
+                                    str(maxSpeedValue) + "|" + 
+                                    str(steeringSteps) + "|" +
+                                    str(sensorAngle) + "|" +  
+                                    str(sensorSpeed) + "|" +
+                                    "camPos" + "|" +
+                                    "camOri" + "|" +
+                                    "confidence" + "|" +
+                                    json.dumps(imu.getAcceleration()) + "|" +
+                                    json.dumps(imu.getAngularRate()) + "|" +
+                                    json.dumps(imu.getMagneticField()), "utf-8"))
+
             """Read Command from Client
 
             Client can send following commands:
@@ -345,25 +340,18 @@ def main():
                 stop_main_motor(2)
                 break
 
-            # ACCELERATION / DECCELERATION 
-            # Change max speed value by fixed amount
-            if "deccelerate" in command:
-                changeMaxSpeed(maxSpeedValue - 0.05)
-            elif "accelerate" in command:
-                changeMaxSpeed(maxSpeedValue + 0.05)
-
             # LEFT / RIGHT
             # Change steering angle by fixed amount
             if "lauto" in command: # If commanded to go left                  
                 changeSteering(0, steering_angle) 
 
                 # Update status accordingly           
-                status = status.split("_")[0] + "_left"
+                status = status.split("_")[0] + "_lauto"
             elif "rauto" in command: # If commanded to go right
                 changeSteering(1, steering_angle)
 
                 # Update status accordingly
-                status = status.split("_")[0] + "_right"
+                status = status.split("_")[0] + "_rauto"
             else:
                 # No steering command, set both to LOW
                 changeSteering(-1, steering_angle)
@@ -375,15 +363,17 @@ def main():
                 if "bauto" in status:
                     stop_main_motor(0.3)
                     speedValue = 21
-                # Adjust speed accordingly
                 hold_forward()
+
+                status = "fauto_" + status.split("_")[1]
             elif "bauto" in command:
                 # Check if vehicle went forward before so wait for 0.3 seconds to give the hardware breathing room
                 if "fauto" in status:
                     stop_main_motor(0.3)
                     speedValue = 21
-                # Adjust speed accordingly
                 hold_backward()
+
+                status = "bauto_" + status.split("_")[1]
             elif "stop" in command:
                 # Stop vehicle for atleast 2 seconds
                 speedValue = 21
@@ -395,24 +385,6 @@ def main():
                 # Reset speed depending on current measured speed
                 speedValue = 19 + (sensorSpeed * 1.325)
                 status = "stop_" + status.split("_")[1]
-
-
-            """Response to client
-            
-            After each cycle of the loop, the vehicle sends data to the client.
-            The status and other information is send via the TCP connection.
-            """
-            clientSocket.send(bytes(status + "|" + 
-                                    str(maxSpeedValue) + "|" + 
-                                    str(steeringSteps) + "|" +
-                                    str(sensorAngle) + "|" +  
-                                    str(sensorSpeed) + "|" +
-                                    "camPos" + "|" +
-                                    "camOri" + "|" +
-                                    "confidence" + "|" +
-                                    json.dumps(imu.getAcceleration()) + "|" +
-                                    json.dumps(imu.getAngularRate()) + "|" +
-                                    json.dumps(imu.getMagneticField()), "utf-8"))
 
         # Before exiting main loop send last statement to client and close socket
         clientSocket.send(bytes("closing", "utf-8"))
