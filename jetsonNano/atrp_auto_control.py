@@ -2,7 +2,7 @@
 
 This script allows the user to remote control the AT-SV. Furthermore it can be
 seen as a demo to show users how to interact with the hardware of the vehicle. 
-This can be used to implement autonomous and intellegent features. 
+This can be used to implement autonomous and intelligent features. 
 
 For this script to work some modules are required. Be sure to install them
 after resetting the OS on the Jetson Nano.
@@ -18,13 +18,6 @@ import numpy as np
 import socket
 import smbus
 import json
-
-# For GPS module
-from gps3 import agps3
-import coordTransform_py.coordTransform_utils as transform
-
-# ZED Camera Library
-import pyzed.sl as sl
 
 # Essentials
 import time
@@ -63,20 +56,8 @@ oldTranslationVector = np.zeros((3))
 HOST = '10.42.0.1' # IP from Jetson Nano
 PORT = 2222 # Some Number with 4 digits
 
-# Initialize parameters for zed camera
-initParams = sl.InitParameters(camera_resolution=sl.RESOLUTION.HD720,
-                            coordinate_units=sl.UNIT.METER,
-                            coordinate_system=sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_UP)
-runTimeParams = sl.RuntimeParameters()
-
-# Create camera object
-zed = sl.Camera()
-cameraSuccessful = False
-
-if zed.open(initParams) != sl.ERROR_CODE.SUCCESS:
-   print("ZED CAMERA DID NOT INITIALZE")
-else:
-    cameraSuccessful = True
+steering_steps = 0  # -2600 - 2600
+oneStep = 162,5
 
 """Status Variable
 
@@ -159,18 +140,37 @@ def hold_backward():
     global status
     status = "backward_" + status.split("_")[1]
 
-def changeSteering(direction: int):
-    """Change stepper in one particular directions
+def changeSteering(direction: int, steering_angle: float):
+    """Change stepper in one particular directions by given angle
     
     Args:
         direction: Integer that indicates the direction  of movement. 0 is left while 1 is to the right.
+        steering_angle: The angle giving by the controller
     """
-    if direction == 0:
+    global steering_steps
+
+    # Map the steering_angle (-16 to 16) to steering_steps (-2600 to 2600)
+    steps_target = (steering_angle + 16) * (2600 / 16) - 2600
+
+    if steering_steps == steps_target:  # don't steer
+        GPIO.output(steering_left_pin, GPIO.LOW)
+        GPIO.output(steering_right_pin, GPIO.LOW)
+        
+    elif direction == 0:
         GPIO.output(steering_left_pin, GPIO.HIGH)
         GPIO.output(steering_right_pin, GPIO.LOW)
+        if steering_steps > -2600:
+            steering_steps -= oneStep
+        else:
+            steering_steps = -2600
+    
     elif direction == 1:
         GPIO.output(steering_right_pin, GPIO.HIGH)
         GPIO.output(steering_left_pin, GPIO.LOW)
+        if steering_steps < 2600:
+            steering_steps += oneStep
+        else:
+            steering_steps = 2600
     else:
         GPIO.output(steering_right_pin, GPIO.LOW)
         GPIO.output(steering_left_pin, GPIO.LOW)
@@ -210,54 +210,6 @@ def filterSensorAngle(sensorAngle):
         sensorAngle = sensorAngleOld
         
     return sensorAngle
-      
-def getCameraPosition(cameraPose):
-    """This method returns the camera position of the ZED camera
-    
-    Return:
-        Numpy array containing the position as vector and the
-        difference to last pos as scalar
-    """
-    if cameraPose is None:
-        return (0, 0, 0)
-
-    global oldTranslationVector
-    global cameraSuccessful
-
-    if zed.grab(runTimeParams) == sl.ERROR_CODE.SUCCESS:
-        positionalState = zed.get_position(cameraPose, reference_frame=sl.REFERENCE_FRAME.WORLD)
-
-        #if positionalState == sl.POSITIONAL_TRACKING_STATE.OK:
-        translation = sl.Translation()
-        translationVector = cameraPose.get_translation(translation).get()
-
-        difVector = translationVector - oldTranslationVector
-        oldTranslationVector = translationVector
-            
-        orientation = sl.Orientation()
-        orientationVector = cameraPose.get_orientation(orientation).get()
-            
-        confidence = cameraPose.pose_confidence
-
-        return (np.append(translationVector, np.linalg.norm(difVector)).tolist(), orientationVector.tolist(), confidence)
-        #else:
-        #    print("Positional Tracking State not ok!")
-        #    return np.append(oldTranslationVector, 0.0, 0).tolist()
-    else:
-        return (np.append(oldTranslationVector, 0.0, 0).tolist(), 0.0, 0.0)
-
-def initCamera(magneticField, acceleration):  
-    # Calculate Psi
-    psi = np.arctan2(magneticField[1], magneticField[2])
-    psi = psi if psi > 0 else psi + 2*np.pi
-
-    # Enable Positional Tracking
-    trackingParams = sl.PositionalTrackingParameters(sl.Transform(
-                        sl.Rotation(0.0, psi - np.pi/2, 0.0), 
-                        sl.Translation(0.0, 0.0, 0.0)))
-    zed.enable_positional_tracking(trackingParams)
-    # Get camera pose
-    return sl.Pose()
 
 def main():
     """Main function of this program
@@ -316,12 +268,6 @@ def main():
     pwmSignal = GPIO.PWM(da_converter_throttle_pin, 100)
     pwmSignal.start(speedValue) # The speed value corresponds to the duty cycle of the PWM signal
 
-    # Get inital camera pose
-    if cameraSuccessful:
-        cameraPose = initCamera(imu.getMagneticField(), imu.getAcceleration())
-    else:
-        cameraPose = None
-
     # Accept first connections in outer loop
     while True:
         try:
@@ -353,10 +299,10 @@ def main():
         This loop is responsible for controlling the vehicle by reading the 
         commands send from the connected client.
         Sensor data received over the i2c connection with the arduino board
-        is read and used for optimising control.
+        is read and used for optimizing control.
         """
         while True:
-            # Arduino communication 
+            # Arduino communication: does not work, steps will be counted here instead
             steeringSteps = arduino_stepper.read_i2c_block_data(i2cAddress_stepper, 0, 2)
 
             # Read 2 bytes block from given address starting at register 0 
@@ -388,8 +334,10 @@ def main():
             - nothing: no key is pressed
             An example command string: "forward-left"
             """
-            command = clientSocket.recv(1024).decode("utf-8")
-            print(command)
+            commands = clientSocket.recv(1024).decode("utf-8")
+            command = commands.split("|")[0]
+            steering_angle = float(commands.split("|")[1])
+            print(command, steering_angle)
 
             # ESCAPING
             # Stop vehicle and exit program
@@ -406,32 +354,32 @@ def main():
 
             # LEFT / RIGHT
             # Change steering angle by fixed amount
-            if "left" in command: # If commanded to go left                  
-                changeSteering(0)   
+            if "lauto" in command: # If commanded to go left                  
+                changeSteering(0, steering_angle) 
 
                 # Update status accordingly           
                 status = status.split("_")[0] + "_left"
-            elif "right" in command: # If commanded to go right
-                changeSteering(1)
+            elif "rauto" in command: # If commanded to go right
+                changeSteering(1, steering_angle)
 
                 # Update status accordingly
                 status = status.split("_")[0] + "_right"
             else:
                 # No steering command, set both to LOW
-                changeSteering(-1)
+                changeSteering(-1, steering_angle)
                     
 
             # FORWARD / BACKWARD / STOP
-            if "forward" in command:
+            if "fauto" in command:
                 # Check if vehicle went backward before so wait for 0.3 seconds to give the hardware breathing room
-                if "backward" in status:
+                if "bauto" in status:
                     stop_main_motor(0.3)
                     speedValue = 21
                 # Adjust speed accordingly
                 hold_forward()
-            elif "backward" in command:
+            elif "bauto" in command:
                 # Check if vehicle went forward before so wait for 0.3 seconds to give the hardware breathing room
-                if "forward" in status:
+                if "fauto" in status:
                     stop_main_motor(0.3)
                     speedValue = 21
                 # Adjust speed accordingly
@@ -454,15 +402,14 @@ def main():
             After each cycle of the loop, the vehicle sends data to the client.
             The status and other information is send via the TCP connection.
             """
-            (camPos, camOri, confidence) = getCameraPosition(cameraPose)
             clientSocket.send(bytes(status + "|" + 
                                     str(maxSpeedValue) + "|" + 
                                     str(steeringSteps) + "|" +
                                     str(sensorAngle) + "|" +  
                                     str(sensorSpeed) + "|" +
-                                    json.dumps(camPos) + "|" +
-                                    json.dumps(camOri) + "|" +
-                                    json.dumps(confidence) + "|" +
+                                    "camPos" + "|" +
+                                    "camOri" + "|" +
+                                    "confidence" + "|" +
                                     json.dumps(imu.getAcceleration()) + "|" +
                                     json.dumps(imu.getAngularRate()) + "|" +
                                     json.dumps(imu.getMagneticField()), "utf-8"))
