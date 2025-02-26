@@ -10,7 +10,7 @@
 #define DRIVER_PUL 7       // motor driver pin
 #define DRIVER_DIR 8       // motor driver pin
 #define PULSE_DURATION 200
-#define STEER_RES 162.5        // steering resolution (number of steps to steer per command)
+#define STEER_RES 162.5        // steering resolution (number of steps to steer per command) (162,5 - 1 degree)
 
 #define RIGHT 0x0
 #define LEFT 0x1

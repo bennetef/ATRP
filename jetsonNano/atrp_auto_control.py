@@ -57,7 +57,7 @@ HOST = '10.42.0.1' # IP from Jetson Nano
 PORT = 2222 # Some Number with 4 digits
 
 steering_steps = 0  # -2600 - 2600
-oneStep = 162,5
+oneStep = 162,5 # equals 1 degree
 
 """Status Variable
 
