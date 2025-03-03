@@ -126,7 +126,9 @@ def gps_to_meters(lat, lon, start_lat, start_lon):
     
     x = dlon * earth_radius * math.cos(mean_lat)  # East
     y = dlat * earth_radius  # North
-    print("X: %f | Y: %f \r" % (x, y))
+
+    #print(f"X: {x}, Y: {y}")
+    # print(f"GPS to meters: lat={lat}, lon={lon}, start_lat={start_lat}, start_lon={start_lon}, x={x}, y={y}")
     return x, y
 
 def cross_track_error(lat_v, lon_v, lat_start, lon_start, lat_n, lon_n):
@@ -142,6 +144,7 @@ def cross_track_error(lat_v, lon_v, lat_start, lon_start, lat_n, lon_n):
     # Determine the sign (negativ:left of path/positiv:right of path) using the cross-product
     sign = math.copysign(1, (x_n - x_start) * (y_v - y_start) - (y_n - y_start) * (x_v - x_start))
     
+    # print(f"Cross-track error: lat_v={lat_v}, lon_v={lon_v}, lat_start={lat_start}, lon_start={lon_start}, lat_n={lat_n}, lon_n={lon_n}, error={error}, sign={sign}")
     return sign * error, x_v, y_v, x_n, y_n
 
 def heading_error(x_v, y_v, x_n, y_n, x_l, y_l):
@@ -161,6 +164,7 @@ def heading_error(x_v, y_v, x_n, y_n, x_l, y_l):
     elif error < -math.pi:
         error += 2 * math.pi
     
+    # print(f"Heading error: x_v={x_v}, y_v={y_v}, x_n={x_n}, y_n={y_n}, x_l={x_l}, y_l={y_l}, path_heading={path_heading}, vehicle_heading={vehicle_heading}, error={error}")
     return error
 
 def error_to_steering(error):
@@ -225,11 +229,11 @@ def create_s_shape_path(start, mid, end):
     s_path = [start_coordinates]
     s_path.extend(waypoints)
 
-def commandLoop(pid: PIDController, path: list, corrected_gps: list, waypoint_index: int, last_position: list) -> (str, int):
+def commandLoop(pid: PIDController, path: list, current_gps: list, waypoint_index: int, last_position: list) -> (str, int):
     command = str("")
 
     # Get the current and next waypoints
-    lat_v, lon_v = corrected_gps
+    lat_v, lon_v = current_gps
     lat_start, lon_start = path[waypoint_index]
     lat_n, lon_n = path[waypoint_index + 1]
     #if waypoint_index + 2 >= len(path):
@@ -247,7 +251,7 @@ def commandLoop(pid: PIDController, path: list, corrected_gps: list, waypoint_in
     steering_error = error_to_steering(error)
 
     # Update the PID controller
-    dt = 0.125  # Time step (adjust as needed)
+    dt = 1  # Time step
     error_correction = pid.update(steering_error, dt)
 
     # Determine the steering command based on the PID output
@@ -261,7 +265,7 @@ def commandLoop(pid: PIDController, path: list, corrected_gps: list, waypoint_in
 
     # Check if the vehicle has reached the next waypoint
     distance_to_next_waypoint = math.sqrt((x_v - x_n)**2 + (y_v - y_n)**2)
-    if distance_to_next_waypoint < 4.0:
+    if distance_to_next_waypoint < 3.5:
         waypoint_index += 1
 
     return command, waypoint_index, error, error_correction, [lat_v, lon_v], steering_error
@@ -289,8 +293,8 @@ def main(argv: list[str]):
     #kalman_params = KalmanFilterParams(process_noise=0.001, measurement_noise=0.05, initial_error=0.05)
     #   kf = KalmanFilterGPS(kalman_params)
 
-    # Initialize PID controller
-    pid_params = PIDParams(kp=0.5, ki=0.001, kd=0.1)  #line: p:0.3
+    # Initialize PID controller 
+    pid_params = PIDParams(kp=0.3, ki=0.005, kd=0.15)  #line, test, curve: kp=0.25, ki=0.001, kd=0.5
     pid = PIDController(pid_params)
 
     last_position = start_coordinates
@@ -302,6 +306,8 @@ def main(argv: list[str]):
     error_correction_list = []
     steering_angle_list = []
 
+    previous_gps = None
+
     while connected and waypoint_index < len(path) - 1:
         data = jetson.recv(2048).decode("utf8")
         orderedData = extractData(data)
@@ -309,24 +315,32 @@ def main(argv: list[str]):
 
         if orderedData is not None:
             current_gps = orderedData["gps"]
-            corrected_gps = current_gps        #kf.update(current_gps)
-            command, waypoint_index, error, error_correction, last_position, steering_error = commandLoop(pid, path, corrected_gps, waypoint_index, last_position)
-            steering_angle = error_correction
+            print(current_gps)
 
-            if command == "":
-                disconnect(jetson)
-                break
+            if previous_gps is None or current_gps != previous_gps:
+                command, waypoint_index, error, error_correction, last_position, steering_error = commandLoop(pid, path, current_gps, waypoint_index, last_position)
+                steering_angle = error_correction
 
-            # send commands
-            commands = f"{command}|{steering_angle:.8f}"
-            jetson.send(bytes(commands, "utf8"))
+                if command == "":
+                    disconnect(jetson)
+                    break
 
-            print("Command: %s | Waypoint: %d | Error: %f | Steering Correction: %f | GPS: %f, %f | Steering: %f \r" % (command, waypoint_index, error, error_correction, current_gps[0], current_gps[1], steering_angle))
+                # send commands
+                commands = f"{command}|{steering_angle:.8f}"
+                jetson.send(bytes(commands, "utf8"))
 
-            error_list.append(error)
-            error_correction_list.append(error_correction)
-            steering_angle_list.append(steering_error)
+                # print(current_gps)
+                print("Command: %s | Waypoint: %d | Error: %f | Steering Correction: %f | GPS: %f, %f | Steering: %f \r" % (command, waypoint_index, error, error_correction, current_gps[0], current_gps[1], steering_angle))
 
+                error_list.append(error)
+                error_correction_list.append(error_correction)
+                steering_angle_list.append(steering_error)
+
+                # save old data
+                previous_gps = current_gps
+            else:
+                jetson.send(bytes(commands, "utf-8"))
+        
         if orderedData is None or keyboard.is_pressed("escape"):
             commands = ["escape", 0.0]
 
@@ -362,7 +376,7 @@ def main(argv: list[str]):
             break
 
         # controlls the update time for controller and driver
-        time.sleep(0.125)    # 125 milliseconds -> 8 Hz
+        time.sleep(0.5)    # 0.5 seconds -> twice the time of the gps update rate of 1 Hz
 
     commands = f"escape|0.0"
     jetson.send(bytes(commands, "utf-8"))

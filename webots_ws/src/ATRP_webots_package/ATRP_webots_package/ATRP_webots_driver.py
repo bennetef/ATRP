@@ -24,7 +24,7 @@ class ATRPDriver:
         self.__right_steer.setVelocity(0)
 
         self.__gps = self.__robot.getDevice('gps')
-        self.__gps.enable(125)
+        self.__gps.enable(1000) # 1s/1Hz
 
         self.__logger = self.__node.get_logger()
         self.__node.create_subscription(AckermannDrive, 'cmd_ackermann', self.__cmd_ackermann_callback, 1)

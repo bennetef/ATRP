@@ -19,4 +19,8 @@ class PIDController:
         derivative = (error - self.prev_error) / dt
         output = (self.params.kp * error + self.params.ki * self.integral + self.params.kd * derivative)
         self.prev_error = error
+
+        # Clamp the output to the range [-16, 16] and round to the nearest whole number
+        output = max(min(output, self.max_output), -self.max_output)
+        output = round(output)
         return output
