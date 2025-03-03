@@ -19,6 +19,10 @@ import socket
 import smbus
 import json
 
+# GPS
+import serial
+import pynmea2
+
 # Essentials
 import time
 import RPi.GPIO as GPIO
@@ -49,6 +53,10 @@ i2cAddress_sensor = 0x40
 arduino_stepper = smbus.SMBus(1)
 i2cAddress_stepper = 0x60
 
+# GPS USB Port
+gps_port = "/dev/ttyACM0"
+ser = serial.Serial(gps_port, baudrate=115200, timeout=1)
+
 # Steering sensor and translation vector old value
 sensorAngleOld = 0
 oldTranslationVector = np.zeros((3))
@@ -57,7 +65,9 @@ HOST = '10.42.0.1' # IP from Jetson Nano
 PORT = 2222 # Some Number with 4 digits
 
 steering_steps = 0  # -2600 - 2600
-oneStep = 162,5 # equals 1 degree
+oneStep = 162.5 # equals 1 degree
+
+gps = [0.0, 0.0]
 
 """Status Variable
 
@@ -232,12 +242,13 @@ def main(argv: list[str]):
     global pwmSignal
     global speedValue
     global maxSpeedValue
+    global gps
     
     speedValue = 21 # Lowest speed value
 
     try: 
         maxSpeedValue = float(argv[1])
-    except ValueError:
+    except (IndexError, ValueError):
         print("No PWM Value given. Using default value of 25.")
         maxSpeedValue = 25
         
@@ -248,7 +259,7 @@ def main(argv: list[str]):
     # Accept first connections in outer loop
     while True:
         try:
-            print("Wating for Connection of Controller on:", str(s))
+            print("Waiting for Connection of Controller on:", str(s))
             clientSocket, address = s.accept()
         except socket.timeout:
             """Timeout leads to exiting program
@@ -297,6 +308,20 @@ def main(argv: list[str]):
             # Convert percentage to degrees            
             sensorAngleDegrees = 120 + (sensorAngle / 100 * 13)
 
+            # GPS Data
+            try:
+                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                if line.startswith("$GPGGA") or line.startswith("$GNGLL"):
+                    msg = pynmea2.parse(line)
+                    gps = [msg.latitude, msg.longitude]
+                if line.startswith("$GNVTG"):
+                    msg = pynmea2.parse(line)
+                    speed_over_ground = msg.spd_over_grnd_kmph
+            except pynmea2.ParseError:
+                print("Fehler Parsen")
+            except Exception as e:
+                print("Fehler:", e)
+
             """Response to client
             
             After each cycle of the loop, the vehicle sends data to the client.
@@ -313,7 +338,8 @@ def main(argv: list[str]):
                                     "confidence" + "|" +
                                     json.dumps(imu.getAcceleration()) + "|" +
                                     json.dumps(imu.getAngularRate()) + "|" +
-                                    json.dumps(imu.getMagneticField()), "utf-8"))
+                                    json.dumps(imu.getMagneticField()) + "|" +
+                                    json.dumps(gps), "utf-8"))
 
             """Read Command from Client
 
@@ -332,7 +358,7 @@ def main(argv: list[str]):
             commands = clientSocket.recv(1024).decode("utf-8")
             command = commands.split("|")[0]
             steering_angle = float(commands.split("|")[1])
-            print(command, steering_angle)
+            print(command, steering_angle, speed_over_ground)
 
             # ESCAPING
             # Stop vehicle and exit program
