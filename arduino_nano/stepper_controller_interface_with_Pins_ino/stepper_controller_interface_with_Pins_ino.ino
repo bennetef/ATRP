@@ -10,10 +10,12 @@
 #define DRIVER_PUL 7       // motor driver pin
 #define DRIVER_DIR 8       // motor driver pin
 #define PULSE_DURATION 200
-#define STEER_RES 162.5        // steering resolution (number of steps to steer per command) (162,5 - 1 degree)
+// #define STEER_RES        // steering resolution (number of steps to steer per command) (162.5 - 1 degree)
 
 #define RIGHT 0x0
 #define LEFT 0x1
+
+float steerRes = 162.5;
 
 // endstop pins
 int leftEndstop = A2; 
@@ -28,7 +30,7 @@ int i2cAddress = 0x60;
 
 // indicates maximum number of steps to left and right of middle position
 int maxNumSteps = 0;
-int step = 0; // the current step (positive is right, negative is left)
+float step = 0.0; // the current step (positive is right, negative is left)
 
 // variable to check for faults
 bool faultDetected = false;
@@ -148,6 +150,7 @@ int homing(){
   }
 
   // return floor of counter / 2
+  Serial.println("Homing Finished");
   return middleSteps;
 }
 
@@ -159,11 +162,12 @@ void readSteering()
 
     //char c = Wire.read(); // receive byte as a character
     // 400 analog read approximates roughly 2V for 10bit resolution
-    if (analogRead(rightSteeringPin) > 400 && step < maxNumSteps - 2*STEER_RES){
+    if (analogRead(rightSteeringPin) > 700 && step < maxNumSteps - 2*steerRes){
       // move to the right
       Serial.println("Moving Right");
+      Serial.println(analogRead(rightSteeringPin));
       digitalWrite(DRIVER_DIR,RIGHT);
-      for(int i = 0; i <= STEER_RES; i++){     
+      for(int i = 0; i <= steerRes; i++){     
         digitalWrite(DRIVER_PUL,HIGH);
         delayMicroseconds(PULSE_DURATION);
         digitalWrite(DRIVER_PUL,LOW);
@@ -171,23 +175,23 @@ void readSteering()
       }
       
       // increase steps
-      step += STEER_RES;
+      step += steerRes;;
     // 400 analog read approximates roughly 2V for 10 bit resolution
-    } else if (analogRead(leftSteeringPin) > 400 && step > - maxNumSteps + 2*STEER_RES) {
+    } else if (analogRead(leftSteeringPin) > 400 && step > - maxNumSteps + 2*steerRes) {
       // move to the left
       Serial.println("Moving Left");
       digitalWrite(DRIVER_DIR,LEFT);
-      for(int i = 0; i <= STEER_RES; i++){    
+      for(int i = 0; i <= steerRes; i++){    
         digitalWrite(DRIVER_PUL,HIGH);
         delayMicroseconds(PULSE_DURATION);
         digitalWrite(DRIVER_PUL,LOW);
         delayMicroseconds(PULSE_DURATION);
       }
       // decrease steps
-      step -= STEER_RES;
+      step -= steerRes;
     } 
     Serial.println(step);
-    Wire.write(step);
+    //Wire.write(step);
     //Serial.println(c); 
   //}
 }

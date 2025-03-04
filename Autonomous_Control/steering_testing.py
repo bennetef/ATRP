@@ -12,11 +12,13 @@ import keyboard
 connected = False
 
 # constants
-HOST = '141.83.207.191' #"10.42.0.1" IP from jetson #'141.83.207.191' IP from Laptop
+HOST = "10.42.0.1" #"10.42.0.1" IP from jetson #'141.83.207.191' IP from Laptop
 PORT = 2222
 
 # negative left, positive right
 steering_angle = 0.0
+flag = False
+counter = 0
 
 def disconnect(s: socket.socket):
     global connected
@@ -79,15 +81,20 @@ def extractData(data: str) -> dict:
 
 def commandLoop():
     global steering_angle
+    global flag
+    global counter
     command = str("_")
 
-    if keyboard.is_pressed('a'):
-        command = command + "_leftauto"
-        steering_angle = -16.0
-    elif keyboard.is_pressed('d'):
-        command = command + "_rightauto"
-        steering_angle = 16.0
-
+    if(flag == False):
+        command = "lauto"
+        steering_angle = -10.0
+        counter = counter+1
+    elif(flag == True):
+        command = "rauto"
+        steering_angle = 10.0
+    
+    if(counter == 5):
+        flag = True
 
     return command, steering_angle
 

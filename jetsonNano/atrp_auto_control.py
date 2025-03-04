@@ -18,6 +18,8 @@ import numpy as np
 import socket
 import smbus
 import json
+import sys
+from typing import List
 
 # GPS
 import serial
@@ -64,10 +66,8 @@ oldTranslationVector = np.zeros((3))
 HOST = '10.42.0.1' # IP from Jetson Nano
 PORT = 2222 # Some Number with 4 digits
 
-steering_steps = 0  # -2600 - 2600
-oneStep = 162.5 # equals 1 degree
-
 gps = [0.0, 0.0]
+speed_over_ground = 0.0
 
 """Status Variable
 
@@ -149,33 +149,11 @@ def changeSteering(direction: int, steering_angle: float):
         direction: Integer that indicates the direction  of movement. 0 is left while 1 is to the right.
         steering_angle: The angle giving by the controller
     """
-    global steering_steps
 
-    # Map the steering_angle (-16 to 16) to steering_steps (-2600 to 2600)
-    steps_target = (steering_angle + 16) * (2600 / 16) - 2600
+    if steering_angle < 0:
+        steering_angle = -steering_angle
 
-    if steering_steps == steps_target:  # don't steer
-        GPIO.output(steering_left_pin, GPIO.LOW)
-        GPIO.output(steering_right_pin, GPIO.LOW)
-        
-    elif direction == 0:
-        GPIO.output(steering_left_pin, GPIO.HIGH)
-        GPIO.output(steering_right_pin, GPIO.LOW)
-        if steering_steps > -2600:
-            steering_steps -= oneStep
-        else:
-            steering_steps = -2600
-    
-    elif direction == 1:
-        GPIO.output(steering_right_pin, GPIO.HIGH)
-        GPIO.output(steering_left_pin, GPIO.LOW)
-        if steering_steps < 2600:
-            steering_steps += oneStep
-        else:
-            steering_steps = 2600
-    else:
-        GPIO.output(steering_right_pin, GPIO.LOW)
-        GPIO.output(steering_left_pin, GPIO.LOW)
+    arduino_stepper.write_i2c_block_data(i2cAddress_stepper, 0, [direction, int(steering_angle)])
 
 def filterSensorAngle(sensorAngle): 
     """This method filters out peaks
@@ -194,7 +172,7 @@ def filterSensorAngle(sensorAngle):
         
     return sensorAngle
 
-def main(argv: list[str]):
+def main(argv: List[str]):
     """Main function of this program
     
     This represents the starting point of the script. 
@@ -243,7 +221,8 @@ def main(argv: list[str]):
     global speedValue
     global maxSpeedValue
     global gps
-    
+    global speed_over_ground
+
     speedValue = 21 # Lowest speed value
 
     try: 
@@ -423,4 +402,4 @@ def main(argv: list[str]):
     quit()
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv)
