@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 import keyboard
+import csv
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 import numpy as np
@@ -265,7 +266,7 @@ def commandLoop(pid: PIDController, path: list, current_gps: list, waypoint_inde
 
     # Check if the vehicle has reached the next waypoint
     distance_to_next_waypoint = math.sqrt((x_v - x_n)**2 + (y_v - y_n)**2)
-    if distance_to_next_waypoint < 3.5:
+    if distance_to_next_waypoint < 5.0:
         waypoint_index += 1
 
     return command, waypoint_index, error, error_correction, [lat_v, lon_v], steering_error
@@ -276,14 +277,22 @@ def main(argv: list[str]):
     for _, arg in enumerate(argv):
         if "test" in arg:
             path = test_path
+            path_file = 'test_path_coordinates.csv'
+            vehicle_file = 'test_vehicle_coordinates.csv'
         elif "line" in arg:
             path = line_path
+            path_file = 'line_path_coordinates.csv'
+            vehicle_file = 'line_vehicle_coordinates.csv'
         elif "curve" in arg:
             create_curve_path()
             path = curve_path
+            path_file = 'curve_path_coordinates.csv'
+            vehicle_file = 'curve_vehicle_coordinates.csv'
         elif "s" in arg:
             create_s_shape_path(s_start, s_mid, s_end)
             path = s_path
+            path_file = 's_path_coordinates.csv'
+            vehicle_file = 's_vehicle_coordinates.csv'
 
     print(path)
 
@@ -294,8 +303,8 @@ def main(argv: list[str]):
     #   kf = KalmanFilterGPS(kalman_params)
 
     # Initialize PID controller 
-    pid_params = PIDParams(kp=0.3, ki=0.005, kd=0.15)  #line, test, curve: kp=0.25, ki=0.001, kd=0.5
-    pid = PIDController(pid_params)
+    pid_params = PIDParams(kp=0.25, ki=0.001, kd=0.75)  #line, test, curve: kp=0.25, ki=0.001, kd=0.5
+    pid = PIDController(pid_params)                     #finished: kp=0.25, ki=0.001, kd=0.75
 
     last_position = start_coordinates
     waypoint_index = 0
@@ -307,83 +316,97 @@ def main(argv: list[str]):
     steering_angle_list = []
 
     previous_gps = None
+    # Open CSV files for writing
+    with open(path_file, 'w', newline='') as path_file, open(vehicle_file, 'w', newline='') as vehicle_file:
+        path_writer = csv.writer(path_file)
+        vehicle_writer = csv.writer(vehicle_file)
 
-    while connected and waypoint_index < len(path) - 1:
-        data = jetson.recv(2048).decode("utf8")
-        orderedData = extractData(data)
+        # Write headers
+        path_writer.writerow(['Latitude', 'Longitude'])
+        vehicle_writer.writerow(['Latitude', 'Longitude'])
+
+        # Write path coordinates to CSV file
+        for coord in path:
+            path_writer.writerow(coord)
+
+        while connected and waypoint_index < len(path) - 1:
+            data = jetson.recv(2048).decode("utf8")
+            orderedData = extractData(data)
+            
+            if orderedData is not None:
+                current_gps = orderedData["gps"]
+                print(current_gps)
+
+                if previous_gps is None or current_gps != previous_gps:
+                    command, waypoint_index, error, error_correction, last_position, steering_error = commandLoop(pid, path, current_gps, waypoint_index, last_position)
+                    steering_angle = error_correction
+
+                    if command == "":
+                        disconnect(jetson)
+                        break
+
+                    # send commands
+                    commands = f"{command}|{steering_angle:.8f}"
+                    jetson.send(bytes(commands, "utf8"))
+
+                    # print(current_gps)
+                    print("Command: %s | Waypoint: %d | Error: %f | Steering Correction: %f | GPS: %f, %f | Steering: %f \r" % (command, waypoint_index, error, error_correction, current_gps[0], current_gps[1], steering_angle))
+
+                    error_list.append(error)
+                    error_correction_list.append(error_correction)
+                    steering_angle_list.append(steering_error)
+
+                    # save old data
+                    previous_gps = current_gps
+
+                    # Write vehicle coordinates to CSV file
+                    vehicle_writer.writerow(current_gps)
+                else:
+                    jetson.send(bytes(commands, "utf-8"))
         
+            if orderedData is None or keyboard.is_pressed("escape"):
+                commands = ["escape", 0.0]
 
-        if orderedData is not None:
-            current_gps = orderedData["gps"]
-            print(current_gps)
+                plt.figure()
+                plt.subplot(3, 1, 1)
+                plt.plot(error_list, label='Error')
+                plt.axhline(y=0, color='r', linestyle='--')
+                plt.xlabel('Time Step')
+                plt.ylabel('Error')
+                plt.ylim(-3, 3)
+                plt.legend()
 
-            if previous_gps is None or current_gps != previous_gps:
-                command, waypoint_index, error, error_correction, last_position, steering_error = commandLoop(pid, path, current_gps, waypoint_index, last_position)
-                steering_angle = error_correction
+                plt.subplot(3, 1, 2)
+                plt.plot(steering_angle_list, label='Steering Error')
+                plt.axhline(y=0, color='r', linestyle='--')
+                plt.xlabel('Time Step')
+                plt.ylabel('Steering Error')
+                plt.ylim(-16.0, 16.0)
+                plt.legend()
+            
+                plt.subplot(3, 1, 3)
+                plt.plot(error_correction_list, label='PID Output')
+                plt.axhline(y=0, color='r', linestyle='--')
+                plt.xlabel('Time Step')
+                plt.ylabel('PID Output')
+                plt.ylim(-16.0, 16.0)
+                plt.legend()
+            
+                plt.tight_layout()
+                plt.show()
 
-                if command == "":
-                    disconnect(jetson)
-                    break
-
-                # send commands
-                commands = f"{command}|{steering_angle:.8f}"
-                jetson.send(bytes(commands, "utf8"))
-
-                # print(current_gps)
-                print("Command: %s | Waypoint: %d | Error: %f | Steering Correction: %f | GPS: %f, %f | Steering: %f \r" % (command, waypoint_index, error, error_correction, current_gps[0], current_gps[1], steering_angle))
-
-                error_list.append(error)
-                error_correction_list.append(error_correction)
-                steering_angle_list.append(steering_error)
-
-                # save old data
-                previous_gps = current_gps
-            else:
                 jetson.send(bytes(commands, "utf-8"))
-        
-        if orderedData is None or keyboard.is_pressed("escape"):
-            commands = ["escape", 0.0]
+                break
 
-            plt.figure()
-            plt.subplot(3, 1, 1)
-            plt.plot(error_list, label='Cross-Track Error')
-            plt.axhline(y=0, color='r', linestyle='--')
-            plt.xlabel('Time Step')
-            plt.ylabel('Error')
-            plt.ylim(-3, 3)
-            plt.legend()
-
-            plt.subplot(3, 1, 2)
-            plt.plot(steering_angle_list, label='Steering Error')
-            plt.axhline(y=0, color='r', linestyle='--')
-            plt.xlabel('Time Step')
-            plt.ylabel('Steering Error')
-            plt.ylim(-16.0, 16.0)
-            plt.legend()
-        
-            plt.subplot(3, 1, 3)
-            plt.plot(error_correction_list, label='PID Output')
-            plt.axhline(y=0, color='r', linestyle='--')
-            plt.xlabel('Time Step')
-            plt.ylabel('PID Output')
-            plt.ylim(-16.0, 16.0)
-            plt.legend()
-        
-            plt.tight_layout()
-            plt.show()
-
-            jetson.send(bytes(commands, "utf-8"))
-            break
-
-        # controlls the update time for controller and driver
-        time.sleep(0.5)    # 0.5 seconds -> twice the time of the gps update rate of 1 Hz
+            # controlls the update time for controller and driver
+            time.sleep(0.5)    # 0.5 seconds -> twice the time of the gps update rate of 1 Hz
 
     commands = f"escape|0.0"
     jetson.send(bytes(commands, "utf-8"))
 
     plt.figure()
     plt.subplot(3, 1, 1)
-    plt.plot(error_list, label='Cross-Track Error')
+    plt.plot(error_list, label='Error')
     plt.axhline(y=0, color='r', linestyle='--')
     plt.xlabel('Time Step')
     plt.ylabel('Error')
