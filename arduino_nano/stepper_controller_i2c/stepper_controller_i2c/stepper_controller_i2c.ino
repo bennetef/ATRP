@@ -15,11 +15,11 @@ int rightEndstop = A3;
 int leftSteeringPin = A6;
 int rightSteeringPin = A7;
 
-const float STEPS_PER_DEGREE = 162.5;
+const float STEPS_PER_DEGREE = 169;
 
 // State variables
 int targetSteps = 0;
-int maxNumSteps = 2600;  // Example max - you can change this after homing
+int maxNumSteps = 2704;  // Example max - you can change this after homing
 int currentSteps = 0;
 int steps = 0;
 
@@ -31,6 +31,7 @@ volatile bool flag = false;
 // Previous command values
 int previousDirection = -1;
 int previousDegrees = 0;
+int previousStepDir = -1;
 
 // Setup
 void setup() {
@@ -48,7 +49,7 @@ void setup() {
   pinMode(rightSteeringPin, INPUT);
 
   delay(3000);
-  maxNumSteps = homing();
+  homing();
   delay(3000);
 }
 
@@ -68,7 +69,7 @@ void loop() {
   }
 
   if (abs(targetSteps - currentSteps) > 100){
-    moveChunk(pendingDirection);
+    moveChunk(targetSteps);
   }
 
   readSteering();
@@ -120,7 +121,8 @@ int homing(){
   }
 
   // return floor of counter / 2
-  Serial.println("Homing Finished");
+  Serial.println("Homing");
+  Serial.println(middleSteps);
   return middleSteps;
 }
 
@@ -143,14 +145,13 @@ void receiveSteeringCommand(int numBytes) {
   }
 }
 
-// Move a single chunk (1 degree = 162.5 steps)
-bool moveChunk(int direction) {
-    int chunk = STEPS_PER_DEGREE + 0.5;
-    int stepDir = (direction > 0) ? RIGHT : LEFT;
+// Move a single chunk (1 degree = 169 steps)
+bool moveChunk(int target) {
+    int chunk = STEPS_PER_DEGREE;
+    int stepDir = (target > currentSteps) ? RIGHT : LEFT;
 
-    // Ensure the motor is stopped before changing directions
-    if (direction != previousDirection) {
-        delay(100);  // Small delay to allow the motor controller to handle the change in direction
+    if (stepDir != previousStepDir){
+      delay(100); // Small delay to allow the motor controller to handle the change in direction
     }
 
     if (stepDir == RIGHT && currentSteps + chunk > maxNumSteps) {
@@ -177,6 +178,8 @@ bool moveChunk(int direction) {
         currentSteps -= chunk;
     }
 
+    previousStepDir = stepDir;
+
     Serial.println(currentSteps);
 
     return true;
@@ -188,12 +191,12 @@ void readSteering()
 
     //char c = Wire.read(); // receive byte as a character
     // 400 analog read approximates roughly 2V for 10bit resolution
-    if (analogRead(rightSteeringPin) > 700 && steps < maxNumSteps - 2*STEPS_PER_DEGREE){
+    if (analogRead(rightSteeringPin) > 700 && steps < maxNumSteps){
       // move to the right
       Serial.println("Moving Right");
       //Serial.println(analogRead(rightSteeringPin));
       digitalWrite(DRIVER_DIR,RIGHT);
-      for(int i = 0; i <= STEPS_PER_DEGREE+0.5; i++){     
+      for(int i = 0; i <= STEPS_PER_DEGREE; i++){     
         digitalWrite(DRIVER_PUL,HIGH);
         delayMicroseconds(PULSE_DURATION);
         digitalWrite(DRIVER_PUL,LOW);
@@ -203,11 +206,11 @@ void readSteering()
       // increase steps
       steps += STEPS_PER_DEGREE;
     // 400 analog read approximates roughly 2V for 10 bit resolution
-    } else if (analogRead(leftSteeringPin) > 400 && steps > - maxNumSteps + 2*STEPS_PER_DEGREE) {
+    } else if (analogRead(leftSteeringPin) > 400 && steps > - maxNumSteps) {
       // move to the left
       Serial.println("Moving Left");
       digitalWrite(DRIVER_DIR,LEFT);
-      for(int i = 0; i <= STEPS_PER_DEGREE+0.5; i++){    
+      for(int i = 0; i <= STEPS_PER_DEGREE; i++){    
         digitalWrite(DRIVER_PUL,HIGH);
         delayMicroseconds(PULSE_DURATION);
         digitalWrite(DRIVER_PUL,LOW);

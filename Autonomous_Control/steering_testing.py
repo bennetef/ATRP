@@ -19,6 +19,7 @@ PORT = 2222
 steering_angle = 0.0
 flag = False
 counter = 0
+counter2 = 0
 
 def disconnect(s: socket.socket):
     global connected
@@ -66,7 +67,7 @@ def extractData(data: str) -> dict:
         "maxSpeed": float(splitted[1]),
         "steeringSteps": splitted[2],
         "sensorAngle": splitted[3],
-        "sensorSpeed": float(splitted[4]),
+        "sensorSpeed": (splitted[4]),
         "cameraPos": splitted[5],
         "cameraOri": splitted[6],
         "cameraConfidence": splitted[7],
@@ -83,18 +84,25 @@ def commandLoop():
     global steering_angle
     global flag
     global counter
+    global counter2
     command = str("_")
 
     if(flag == False):
         command = "lauto"
-        steering_angle = -10.0
+        steering_angle = -7.0
         counter = counter+1
     elif(flag == True):
-        command = "rauto"
-        steering_angle = 10.0
+        command = "lauto"
+        steering_angle = -15.0
+        counter2 = counter2+1
     
-    if(counter == 5):
+    if(counter == 30):
         flag = True
+        counter = 0
+
+    if(counter2 == 30):
+        flag = False
+        counter2 = 0
 
     return command, steering_angle
 
@@ -103,19 +111,28 @@ def main(argv: list[str]):
     jetson = connect()
 
     while connected:
+
+        if keyboard.is_pressed("escape") or keyboard.is_pressed("k"):
+                commands = f"escape|0.0"
+                jetson.send(bytes(commands, "utf-8"))
+                disconnect(jetson)
+                break
+        
         command, steering_angle = commandLoop() 
 
         if command == "":
             disconnect(jetson)    
+            
+        # wait for data and decode
+        data = jetson.recv(2048).decode("utf8")
+        orderedData = extractData(data) 
+        gps = orderedData["gps"]
         
         commands = f"{command}|{steering_angle:.8f}"
         jetson.send(bytes(commands, "utf8"))
 
-        # wait for data and decode
-        data = jetson.recv(2048).decode("utf8")
-        orderedData = extractData(data) 
 
-        print("Command: %s | Steering: %f \r" % (command, steering_angle))
+        print("Command: %s | Steering: %f | GPS: %f, %f \r" % (command, steering_angle, gps[0], gps[1]))
         #sys.stdout.write("Command: %s | Max Velocity: %d | Current Velocity: %d \r" % (orderedData["command"], orderedData["maxSpeed"], orderedData["sensorSpeed"]))
         #sys.stdout.flush()
 

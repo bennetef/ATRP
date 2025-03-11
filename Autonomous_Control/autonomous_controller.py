@@ -6,6 +6,7 @@ import threading
 import time
 import keyboard
 import csv
+import datetime
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 import numpy as np
@@ -16,7 +17,7 @@ from pid_controller import PIDController, PIDParams
 connected = False
 
 # constants
-HOST = '141.83.207.191' #"10.42.0.1" IP from jetson #'141.83.207.191' IP from Laptop
+HOST = '10.42.0.1' #"10.42.0.1" IP from jetson #'141.83.207.191' IP from Laptop
 PORT = 2222
 
 # Start GPS coordinates (latitude, longitude)
@@ -266,7 +267,7 @@ def commandLoop(pid: PIDController, path: list, current_gps: list, waypoint_inde
 
     # Check if the vehicle has reached the next waypoint
     distance_to_next_waypoint = math.sqrt((x_v - x_n)**2 + (y_v - y_n)**2)
-    if distance_to_next_waypoint < 5.0:
+    if distance_to_next_waypoint < 4.5:
         waypoint_index += 1
 
     return command, waypoint_index, error, error_correction, [lat_v, lon_v], steering_error
@@ -274,25 +275,31 @@ def commandLoop(pid: PIDController, path: list, current_gps: list, waypoint_inde
 def main(argv: list[str]):
     global path
 
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+
     for _, arg in enumerate(argv):
         if "test" in arg:
             path = test_path
-            path_file = 'test_path_coordinates.csv'
-            vehicle_file = 'test_vehicle_coordinates.csv'
+            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_path_coordinates_{timestamp}.csv'
+            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_vehicle_coordinates_{timestamp}.csv'
+            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_output_{timestamp}.svg'
         elif "line" in arg:
             path = line_path
-            path_file = 'line_path_coordinates.csv'
-            vehicle_file = 'line_vehicle_coordinates.csv'
+            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_path_coordinates{timestamp}.csv'
+            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_vehicle_coordinates{timestamp}.csv'
+            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_output{timestamp}.svg'
         elif "curve" in arg:
             create_curve_path()
             path = curve_path
-            path_file = 'curve_path_coordinates.csv'
-            vehicle_file = 'curve_vehicle_coordinates.csv'
+            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_path_coordinates{timestamp}.csv'
+            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_vehicle_coordinates{timestamp}.csv'
+            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_output{timestamp}.svg'
         elif "s" in arg:
             create_s_shape_path(s_start, s_mid, s_end)
             path = s_path
-            path_file = 's_path_coordinates.csv'
-            vehicle_file = 's_vehicle_coordinates.csv'
+            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_path_coordinates{timestamp}.csv'
+            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_vehicle_coordinates{timestamp}.csv'
+            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_output{timestamp}.svg'
 
     print(path)
 
@@ -310,6 +317,8 @@ def main(argv: list[str]):
     waypoint_index = 0
     error = 0.0
     error_correction = 0.0
+
+    commands = f"nothing|0.0"
 
     error_list = []
     error_correction_list = []
@@ -333,39 +342,10 @@ def main(argv: list[str]):
             data = jetson.recv(2048).decode("utf8")
             orderedData = extractData(data)
             
-            if orderedData is not None:
-                current_gps = orderedData["gps"]
-                print(current_gps)
-
-                if previous_gps is None or current_gps != previous_gps:
-                    command, waypoint_index, error, error_correction, last_position, steering_error = commandLoop(pid, path, current_gps, waypoint_index, last_position)
-                    steering_angle = error_correction
-
-                    if command == "":
-                        disconnect(jetson)
-                        break
-
-                    # send commands
-                    commands = f"{command}|{steering_angle:.8f}"
-                    jetson.send(bytes(commands, "utf8"))
-
-                    # print(current_gps)
-                    print("Command: %s | Waypoint: %d | Error: %f | Steering Correction: %f | GPS: %f, %f | Steering: %f \r" % (command, waypoint_index, error, error_correction, current_gps[0], current_gps[1], steering_angle))
-
-                    error_list.append(error)
-                    error_correction_list.append(error_correction)
-                    steering_angle_list.append(steering_error)
-
-                    # save old data
-                    previous_gps = current_gps
-
-                    # Write vehicle coordinates to CSV file
-                    vehicle_writer.writerow(current_gps)
-                else:
-                    jetson.send(bytes(commands, "utf-8"))
-        
-            if orderedData is None or keyboard.is_pressed("escape"):
-                commands = ["escape", 0.0]
+            if orderedData is None or keyboard.is_pressed("escape") or keyboard.is_pressed("k"):
+                commands = f"escape|0.0"
+                jetson.send(bytes(commands, "utf-8"))
+                disconnect(jetson)
 
                 plt.figure()
                 plt.subplot(3, 1, 1)
@@ -373,7 +353,7 @@ def main(argv: list[str]):
                 plt.axhline(y=0, color='r', linestyle='--')
                 plt.xlabel('Time Step')
                 plt.ylabel('Error')
-                plt.ylim(-3, 3)
+                plt.ylim(-4, 4)
                 plt.legend()
 
                 plt.subplot(3, 1, 2)
@@ -393,10 +373,42 @@ def main(argv: list[str]):
                 plt.legend()
             
                 plt.tight_layout()
+                plt.savefig(output_file, format='svg')
                 plt.show()
 
-                jetson.send(bytes(commands, "utf-8"))
                 break
+
+            if orderedData is not None:
+                current_gps = orderedData["gps"]
+                print(current_gps)
+
+                if current_gps[0] > 0.1 and current_gps[1] > 0.1 and (previous_gps is None or current_gps != previous_gps):
+                    command, waypoint_index, error, error_correction, last_position, steering_error = commandLoop(pid, path, current_gps, waypoint_index, last_position)
+                    steering_angle = error_correction
+
+                    if command == "":
+                        disconnect(jetson)
+                        break
+
+                    # send commands
+                    commands = f"{command}|{steering_angle:.8f}"
+                    jetson.send(bytes(commands, "utf8"))
+
+                    # print(current_gps)
+                    print("Command: %s | Waypoint: %d | Error: %f | Steering Error: %f | GPS: %f, %f | Steering: %f \r" % (command, waypoint_index, error, steering_error, current_gps[0], current_gps[1], steering_angle))
+
+                    error_list.append(error)
+                    error_correction_list.append(error_correction)
+                    steering_angle_list.append(steering_error)
+
+                    # save old data
+                    previous_gps = current_gps
+
+                    # Write vehicle coordinates to CSV file
+                    vehicle_writer.writerow(current_gps)
+                else:
+                    jetson.send(bytes(commands, "utf-8"))
+        
 
             # controlls the update time for controller and driver
             time.sleep(0.5)    # 0.5 seconds -> twice the time of the gps update rate of 1 Hz
@@ -410,7 +422,7 @@ def main(argv: list[str]):
     plt.axhline(y=0, color='r', linestyle='--')
     plt.xlabel('Time Step')
     plt.ylabel('Error')
-    plt.ylim(-3, 3)
+    plt.ylim(-4, 4)
     plt.legend()
 
     plt.subplot(3, 1, 2)
@@ -430,6 +442,7 @@ def main(argv: list[str]):
     plt.legend()
 
     plt.tight_layout()
+    plt.savefig(output_file, format='svg')
     plt.show()
 
     sys.stdout.write("\n")

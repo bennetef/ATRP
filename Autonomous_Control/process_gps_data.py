@@ -47,9 +47,9 @@ def plot_coordinates(path_coords, vehicle_coords, output_file):
     plt.show()
 
 def main():
-    path_file = '/home/bennet/ATRP/Autonomous_Control/curve_path_coordinates.csv'
-    vehicle_file = '/home/bennet/ATRP/Autonomous_Control/curve_vehicle_coordinates.csv'
-    output_file = '/home/bennet/ATRP/Autonomous_Control/gps_comparison.svg'
+    path_file = r'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_path_coordinates2025-03-07_17-42.csv' #'/home/bennet/ATRP/Autonomous_Control/curve_path_coordinates.csv'
+    vehicle_file = r'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_vehicle_coordinates2025-03-07_17-42.csv'    #'/home/bennet/ATRP/Autonomous_Control/curve_vehicle_coordinates.csv'
+    output_file = r'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_gps_1.svg' #'/home/bennet/ATRP/Autonomous_Control/gps_comparison.svg'
 
     # Read GPS coordinates from CSV files
     path_coords = read_csv(path_file)

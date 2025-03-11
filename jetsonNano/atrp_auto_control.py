@@ -24,10 +24,12 @@ from typing import List
 # GPS
 import serial
 import pynmea2
+import select
 
 # Essentials
 import time
 import RPi.GPIO as GPIO
+import threading
 
 # IMU scripts
 from imu_phidget_spatial import IMU
@@ -124,7 +126,7 @@ def hold_forward():
     Each tick the controller commands to go forward the vehicle accelerates to the set max speed. 
     Also the relais are set to apply a negative voltage over the main motor to achieve a forward rotation.
     """
-    accelerate_to_maxspeed(0.05)
+    accelerate_to_maxspeed(0.8)
 
     # Set GPIO outputs for the relais
     GPIO.output(relay_plus_forward_pin, GPIO.LOW)
@@ -136,7 +138,7 @@ def hold_backward():
     Each tick the controller commands to go backward the vehicle accelerates to the set max speed. 
     Also the relais are set to apply a positive voltage over the main motor to achieve a backward rotation.
     """
-    accelerate_to_maxspeed(0.05)
+    accelerate_to_maxspeed(0.1)
 
     # Set GPIO outputs for the relais
     GPIO.output(relay_plus_backward_pin, GPIO.LOW)
@@ -172,6 +174,110 @@ def filterSensorAngle(sensorAngle):
         
     return sensorAngle
 
+def gps_data_retrieval():
+    global gps, speed_over_ground
+    while True:
+        try:
+            if select.select([ser], [], [], 0.1)[0]:
+                line = ser.readline().decode('utf-8', errors='ignore').strip()
+                if line.startswith("$GPGGA") or line.startswith("$GNGLL"):
+                    msg = pynmea2.parse(line)
+                    gps = [msg.latitude, msg.longitude]
+                if line.startswith("$GNVTG"):
+                    msg2 = pynmea2.parse(line)
+                    speed_over_ground = msg2.spd_over_grnd_kmph
+        except pynmea2.ParseError:
+            print("Fehler Parsen")
+        except Exception as e:
+            print("Fehler:", e)
+
+def handle_client_commands(clientSocket):
+    global status, speedValue, maxSpeedValue, gps, speed_over_ground
+    while True:
+        clientSocket.send(bytes(status + "|" + 
+                                str(maxSpeedValue) + "|" + 
+                                "steeringSteps" + "|" +
+                                "sensorAngle" + "|" +  
+                                str(speed_over_ground) + "|" +
+                                "camPos" + "|" +
+                                "camOri" + "|" +
+                                "confidence" + "|" +
+                                "imu.getAcceleration" + "|" +
+                                "imu.getAngularRate "+ "|" +
+                                "imu.getMagneticField" + "|" +
+                                json.dumps(gps), "utf-8"))
+
+        """Read Command from Client
+
+        Client can send following commands:
+        - forward: The forward key is pressed
+        - backward: The backward key is pressed
+        - accelerate: The acceleration key is pressed
+        - deccelerate: the decceleration key is pressed
+        - stop: The Break key is pressed (stops motor)
+        - left: steer Left key is pressed
+        - right: steer right key is pressed
+        - escape: terminates the program and shuts robot off
+        - nothing: no key is pressed
+        An example command string: "forward-left"
+        """
+        commands = clientSocket.recv(1024).decode("utf-8")
+        command = commands.split("|")[0]
+        steering_angle = float(commands.split("|")[1])
+        print(command, steering_angle, speed_over_ground, gps)
+
+        # ESCAPING
+        # Stop vehicle and exit program
+        if "escape" in command:
+            stop_main_motor(2)
+            break
+
+        # LEFT / RIGHT
+        # Change steering angle by fixed amount
+        if "lauto" in command: # If commanded to go left                  
+            changeSteering(0, steering_angle) 
+
+            # Update status accordingly           
+            status = status.split("_")[0] + "_lauto"
+        elif "rauto" in command: # If commanded to go right
+            changeSteering(1, steering_angle)
+
+            # Update status accordingly
+            status = status.split("_")[0] + "_rauto"
+        else:
+            # No steering command, set both to LOW
+            changeSteering(-1, steering_angle)
+                
+
+        # FORWARD / BACKWARD / STOP
+        if "fauto" in command:
+            # Check if vehicle went backward before so wait for 0.3 seconds to give the hardware breathing room
+            if "bauto" in status:
+                stop_main_motor(0.3)
+                speedValue = 21
+            
+            hold_forward()
+            status = "fauto_" + status.split("_")[1]
+        elif "bauto" in command:
+            # Check if vehicle went forward before so wait for 0.3 seconds to give the hardware breathing room
+            if "fauto" in status:
+                stop_main_motor(0.3)
+                speedValue = 21
+            
+            hold_backward()
+            status = "bauto_" + status.split("_")[1]
+        elif "stop" in command:
+            # Stop vehicle for atleast 2 seconds
+            speedValue = 21
+            stop_main_motor(2)
+            status = "stop_" + status.split("_")[1]
+        elif "nothing" in command:
+            # If nothing is commanded robot stops and speed value resets
+            stop_main_motor(0)
+            # Reset speed depending on current measured speed
+            speedValue = 21
+            status = "stop_" + status.split("_")[1]
+
 def main(argv: List[str]):
     """Main function of this program
     
@@ -204,6 +310,10 @@ def main(argv: List[str]):
 
     # Wait for Hardware to initialize 
     time.sleep(3)
+
+    # enable arduino nano for steering (starts homing)
+    GPIO.output(relay_nano_steering_pin, GPIO.LOW)
+    time.sleep(3)
     
     #------------------------ AUDIBLE CLICK OF THE RELAIS ----------------------------------
 
@@ -233,7 +343,7 @@ def main(argv: List[str]):
         
     # Start PWM signal
     pwmSignal = GPIO.PWM(da_converter_throttle_pin, 100)
-    pwmSignal.start(maxSpeedValue) # The speed value corresponds to the duty cycle of the PWM signal
+    pwmSignal.start(speedValue) # The speed value corresponds to the duty cycle of the PWM signal
 
     # Accept first connections in outer loop
     while True:
@@ -261,135 +371,13 @@ def main(argv: List[str]):
             clientSocket.close()
             continue
 
-        """MAIN LOOP
-        
-        This loop is responsible for controlling the vehicle by reading the 
-        commands send from the connected client.
-        Sensor data received over the i2c connection with the arduino board
-        is read and used for optimizing control.
-        """
-        while True:
-            # Arduino communication: does not work, steps will be counted here instead
-            steeringSteps = arduino_stepper.read_i2c_block_data(i2cAddress_stepper, 0, 2)
+        # Start GPS data retrieval thread
+        gps_thread = threading.Thread(target=gps_data_retrieval)
+        gps_thread.daemon = True
+        gps_thread.start()
 
-            # Read 2 bytes block from given address starting at register 0 
-            [sensorSpeed, sensorAngle] = arduino_sensor.read_i2c_block_data(i2cAddress_sensor, 0, 2)
-            #sensorSpeed = 0
-            #sensorAngle = 0
-            # Convert detected speed value to m/s it's in m/0.25s
-            sensorSpeed = 4 * sensorSpeed / 10
-            # Convert detected steering angle to percent (negative: right, positve: left)
-            if sensorAngle > 130:
-                sensorAngle = sensorAngle - 250
-               
-            # Filter out peaks from measured value
-            sensorAngle = filterSensorAngle(sensorAngle) 
-            # Convert percentage to degrees            
-            sensorAngleDegrees = 120 + (sensorAngle / 100 * 13)
-
-            # GPS Data
-            try:
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
-                if line.startswith("$GPGGA") or line.startswith("$GNGLL"):
-                    msg = pynmea2.parse(line)
-                    gps = [msg.latitude, msg.longitude]
-                if line.startswith("$GNVTG"):
-                    msg = pynmea2.parse(line)
-                    speed_over_ground = msg.spd_over_grnd_kmph
-            except pynmea2.ParseError:
-                print("Fehler Parsen")
-            except Exception as e:
-                print("Fehler:", e)
-
-            """Response to client
-            
-            After each cycle of the loop, the vehicle sends data to the client.
-            The status and other information is send via the TCP connection.
-            Not used information is just as placeholder.
-            """
-            clientSocket.send(bytes(status + "|" + 
-                                    str(maxSpeedValue) + "|" + 
-                                    str(steeringSteps) + "|" +
-                                    str(sensorAngle) + "|" +  
-                                    str(sensorSpeed) + "|" +
-                                    "camPos" + "|" +
-                                    "camOri" + "|" +
-                                    "confidence" + "|" +
-                                    json.dumps(imu.getAcceleration()) + "|" +
-                                    json.dumps(imu.getAngularRate()) + "|" +
-                                    json.dumps(imu.getMagneticField()) + "|" +
-                                    json.dumps(gps), "utf-8"))
-
-            """Read Command from Client
-
-            Client can send following commands:
-            - forward: The forward key is pressed
-            - backward: The backward key is pressed
-            - accelerate: The acceleration key is pressed
-            - deccelerate: the decceleration key is pressed
-            - stop: The Break key is pressed (stops motor)
-            - left: steer Left key is pressed
-            - right: steer right key is pressed
-            - escape: terminates the program and shuts robot off
-            - nothing: no key is pressed
-            An example command string: "forward-left"
-            """
-            commands = clientSocket.recv(1024).decode("utf-8")
-            command = commands.split("|")[0]
-            steering_angle = float(commands.split("|")[1])
-            print(command, steering_angle, speed_over_ground)
-
-            # ESCAPING
-            # Stop vehicle and exit program
-            if "escape" in command:
-                stop_main_motor(2)
-                break
-
-            # LEFT / RIGHT
-            # Change steering angle by fixed amount
-            if "lauto" in command: # If commanded to go left                  
-                changeSteering(0, steering_angle) 
-
-                # Update status accordingly           
-                status = status.split("_")[0] + "_lauto"
-            elif "rauto" in command: # If commanded to go right
-                changeSteering(1, steering_angle)
-
-                # Update status accordingly
-                status = status.split("_")[0] + "_rauto"
-            else:
-                # No steering command, set both to LOW
-                changeSteering(-1, steering_angle)
-                    
-
-            # FORWARD / BACKWARD / STOP
-            if "fauto" in command:
-                # Check if vehicle went backward before so wait for 0.3 seconds to give the hardware breathing room
-                if "bauto" in status:
-                    stop_main_motor(0.3)
-                    speedValue = 21
-                hold_forward()
-
-                status = "fauto_" + status.split("_")[1]
-            elif "bauto" in command:
-                # Check if vehicle went forward before so wait for 0.3 seconds to give the hardware breathing room
-                if "fauto" in status:
-                    stop_main_motor(0.3)
-                    speedValue = 21
-                hold_backward()
-
-                status = "bauto_" + status.split("_")[1]
-            elif "stop" in command:
-                # Stop vehicle for atleast 2 seconds
-                speedValue = 21
-                stop_main_motor(2)
-                status = "stop_" + status.split("_")[1]
-            elif "nothing" in command:
-                # If nothing is commanded robot stops and speed value resets
-                stop_main_motor(0)
-                # Reset speed depending on current measured speed
-                speedValue = 19 + (sensorSpeed * 1.325)
-                status = "stop_" + status.split("_")[1]
+        # Handle client commands
+        handle_client_commands(clientSocket)
 
         # Before exiting main loop send last statement to client and close socket
         clientSocket.send(bytes("closing", "utf-8"))
@@ -398,6 +386,7 @@ def main(argv: List[str]):
         break
 
     # Clean up GPIO Pins and exit program
+    GPIO.output(relay_nano_steering_pin, GPIO.HIGH) # disable arduino nano for steering
     GPIO.cleanup()
     quit()
 

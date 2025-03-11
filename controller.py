@@ -66,7 +66,7 @@ def connect() -> socket.socket:
 def extractData(data: str) -> dict:
     splitted = data.split(sep="|")
 
-    if len(splitted) != 11:
+    if len(splitted) != 12:
         print(f"Not enough data send by ATRP! Number of data points sent: {len(splitted)}.")
         return None
 
@@ -81,7 +81,8 @@ def extractData(data: str) -> dict:
         "cameraConfidence": float(splitted[7]),
         "imuAcc": json.loads(splitted[8]),
         "imuGyr": json.loads(splitted[9]),
-        "imuMag": json.loads(splitted[10])
+        "imuMag": json.loads(splitted[10]),
+        "gps": json.loads(splitted[11])
     }
 
     # for now i am ignoring camera and imu data
@@ -209,9 +210,10 @@ def main(argv: list[str]):
         # wait for data and decode
         data = jetson.recv(2048).decode("utf8")
         orderedData = extractData(data)
+        current_gps = orderedData["gps"]
 
         if not orderedData is None:
-            sys.stdout.write("Max Velocity: %d | Current Velocity: %d \r" % (orderedData["maxSpeed"], orderedData["sensorSpeed"]))
+            sys.stdout.write("Max Velocity: %d | Current Velocity: %d | GPS: %f, %f \r" % (orderedData["maxSpeed"], orderedData["sensorSpeed"], current_gps[0], current_gps[1]))
             sys.stdout.flush()
 
     sys.stdout.write("\n")

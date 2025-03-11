@@ -23,6 +23,11 @@ import json
 from gps3 import agps3
 import coordTransform_py.coordTransform_utils as transform
 
+# GPS
+import serial
+import pynmea2
+import select
+
 # ZED Camera Library
 import pyzed.sl as sl
 
@@ -60,8 +65,15 @@ i2cAddress_stepper = 0x60
 sensorAngleOld = 0
 oldTranslationVector = np.zeros((3))
 
+# GPS USB Port
+gps_port = "/dev/ttyACM0"
+ser = serial.Serial(gps_port, baudrate=115200, timeout=1)
+
 HOST = '10.42.0.1' # IP from Jetson Nano
 PORT = 2222 # Some Number with 4 digits
+
+gps = [0.0, 0.0]
+speed_over_ground = 0.0
 
 # Initialize parameters for zed camera
 initParams = sl.InitParameters(camera_resolution=sl.RESOLUTION.HD720,
@@ -84,7 +96,7 @@ This variable shows the current status of the vehicle. To allow multiple stati a
 strings seperated by '_'. This allows us to expand the status further and gives the controller insight in what is
 going on with the vehicle. 
 
-stati: stop, forward, backward, notCalibrate, left, right
+stati: stop, forward, backward, notCalibrated, left, right
 
 Note: "left" and "right" stati represent the side on which the steering servo has contact
 """
@@ -292,6 +304,10 @@ def main():
     # Wait for Hardware to initialize 
     time.sleep(3)
     
+    # enable arduino nano for steering (starts homing)
+    GPIO.output(relay_nano_steering_pin, GPIO.LOW)
+    time.sleep(3)
+    
     #------------------------ AUDIBLE CLICK OF THE RELAIS ----------------------------------
 
     # Create a new socket for IPv4 addresses
@@ -307,6 +323,8 @@ def main():
     global pwmSignal
     global speedValue
     global maxSpeedValue
+    global gps
+    global speed_over_ground
     
     # Initializing variables
     speedValue = 21 # Lowest speed value
@@ -322,7 +340,7 @@ def main():
     else:
         cameraPose = None
 
-    # Accept first connections in outer loop
+    # Accept first connections in outer loopsa
     while True:
         try:
             print("Wating for Connection of Controller on:", str(s))
@@ -374,6 +392,21 @@ def main():
             # Convert percentage to degrees            
             sensorAngleDegrees = 120 + (sensorAngle / 100 * 13)
 
+            # GPS Data
+            try:
+                if select.select([ser], [], [], 0.1)[0]:
+                    line = ser.readline().decode('utf-8', errors='ignore').strip()
+                    if line.startswith("$GPGGA") or line.startswith("$GNGLL"):
+                        msg = pynmea2.parse(line)
+                        gps = [msg.latitude, msg.longitude]
+                    if line.startswith("$GNVTG"):
+                        msg2 = pynmea2.parse(line)
+                        speed_over_ground = msg2.spd_over_grnd_kmph
+            except pynmea2.ParseError:
+                print("Fehler Parsen")
+            except Exception as e:
+                print("Fehler:", e)
+
             """Read Command from Client
 
             Client can send following commands:
@@ -386,10 +419,11 @@ def main():
             - right: steer right key is pressed
             - escape: terminates the program and shuts robot off
             - nothing: no key is pressed
-            An example command string: "forward-left"
+            An example command string: "forward_left"
             """
             command = clientSocket.recv(1024).decode("utf-8")
             print(command)
+            print(speed_over_ground)
 
             # ESCAPING
             # Stop vehicle and exit program
@@ -445,7 +479,7 @@ def main():
                 # If nothing is commanded robot stops and speed value resets
                 stop_main_motor(0)
                 # Reset speed depending on current measured speed
-                speedValue = 19 + (sensorSpeed * 1.325)
+                speedValue = 21
                 status = "stop_" + status.split("_")[1]
 
 
@@ -465,7 +499,8 @@ def main():
                                     json.dumps(confidence) + "|" +
                                     json.dumps(imu.getAcceleration()) + "|" +
                                     json.dumps(imu.getAngularRate()) + "|" +
-                                    json.dumps(imu.getMagneticField()), "utf-8"))
+                                    json.dumps(imu.getMagneticField())+ "|" +
+                                    json.dumps(gps), "utf-8"))
 
         # Before exiting main loop send last statement to client and close socket
         clientSocket.send(bytes("closing", "utf-8"))
@@ -474,6 +509,7 @@ def main():
         break
 
     # Clean up GPIO Pins and exit program
+    GPIO.output(relay_nano_steering_pin, GPIO.HIGH) # disable arduino nano for steering
     GPIO.cleanup()
     quit()
 
