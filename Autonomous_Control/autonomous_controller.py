@@ -17,7 +17,7 @@ from pid_controller import PIDController, PIDParams
 connected = False
 
 # constants
-HOST = '10.42.0.1' #"10.42.0.1" IP from jetson #'141.83.207.191' IP from Laptop
+HOST = '192.168.178.52' #"10.42.0.1" IP from jetson #'192.168.178.52' IP from Laptop
 PORT = 2222
 
 # Start GPS coordinates (latitude, longitude)
@@ -71,6 +71,7 @@ def disconnect(s: socket.socket):
 
     s.close()
     connected = False
+    return
 
 def connect() -> socket.socket:
     global connected
@@ -267,7 +268,7 @@ def commandLoop(pid: PIDController, path: list, current_gps: list, waypoint_inde
 
     # Check if the vehicle has reached the next waypoint
     distance_to_next_waypoint = math.sqrt((x_v - x_n)**2 + (y_v - y_n)**2)
-    if distance_to_next_waypoint < 4.5:
+    if distance_to_next_waypoint < 5.0:
         waypoint_index += 1
 
     return command, waypoint_index, error, error_correction, [lat_v, lon_v], steering_error
@@ -280,26 +281,26 @@ def main(argv: list[str]):
     for _, arg in enumerate(argv):
         if "test" in arg:
             path = test_path
-            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_path_coordinates_{timestamp}.csv'
-            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_vehicle_coordinates_{timestamp}.csv'
-            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_output_{timestamp}.svg'
+            path_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_test_path_coordinates_{timestamp}.csv'  #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_path_coordinates_{timestamp}.csv'
+            vehicle_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_test_vehicle_coordinates_{timestamp}.csv'    #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_vehicle_coordinates_{timestamp}.csv'
+            output_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_test_pid_output_{timestamp}.svg'     #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\test_output_{timestamp}.svg'
         elif "line" in arg:
             path = line_path
-            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_path_coordinates{timestamp}.csv'
-            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_vehicle_coordinates{timestamp}.csv'
-            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_output{timestamp}.svg'
+            path_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_line_path_coordinates_{timestamp}.csv'  #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_path_coordinates{timestamp}.csv'
+            vehicle_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_line_vehicle_coordinates_{timestamp}.csv'   #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_vehicle_coordinates{timestamp}.csv'
+            output_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_line_pid_output_{timestamp}.svg'     #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\line_output{timestamp}.svg'
         elif "curve" in arg:
             create_curve_path()
             path = curve_path
-            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_path_coordinates{timestamp}.csv'
-            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_vehicle_coordinates{timestamp}.csv'
-            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_output{timestamp}.svg'
+            path_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_curve_path_coordinates_{timestamp}.csv'   #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_path_coordinates{timestamp}.csv'
+            vehicle_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_curve_vehicle_coordinates_{timestamp}.csv'   #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_vehicle_coordinates{timestamp}.csv'
+            output_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_curve_pid_output_{timestamp}.svg'     #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\curve_output{timestamp}.svg'
         elif "s" in arg:
             create_s_shape_path(s_start, s_mid, s_end)
             path = s_path
-            path_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_path_coordinates{timestamp}.csv'
-            vehicle_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_vehicle_coordinates{timestamp}.csv'
-            output_file = rf'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_output{timestamp}.svg'
+            path_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_s_path_coordinates_{timestamp}.csv' #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_path_coordinates{timestamp}.csv'
+            vehicle_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_s_vehicle_coordinates_{timestamp}.csv'   #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_vehicle_coordinates{timestamp}.csv'
+            output_file = rf'/home/bennet/ATRP/Autonomous_Control/Data/Simulation/sim_s_pid_output_{timestamp}.svg'     #'C:\Users\benne\OneDrive\Dokumente\Uni\Bachelor-Arbeit\ATRP\Autonomous_Control\Data\s_output{timestamp}.svg'
 
     print(path)
 

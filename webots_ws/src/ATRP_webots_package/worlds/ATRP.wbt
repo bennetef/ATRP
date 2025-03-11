@@ -16,8 +16,8 @@ WorldInfo {
   gpsReference 53.8343 10.698 0
 }
 Viewpoint {
-  orientation 0.025932424218149706 -0.10795791427126693 -0.9938171854623806 5.810450929306781
-  position -37.48489525178198 -20.41271241914247 2.9557246750893724
+  orientation 0.07603086734638642 -0.3244089463974799 -0.9428563743793819 5.796453558075276
+  position -36.45924856092678 -20.04282119915353 3.2414523534716784
   follow "ATRP"
 }
 TexturedBackground {
@@ -42,25 +42,25 @@ UnevenTerrain {
 DEF Trees Group {
   children [
     Tree {
-      translation 34.2794 9.70532 1
+      translation 34.1923 9.73594 1
       rotation 0 0 1 -1.0472
       name "tree(3)"
       locked FALSE
     }
     Tree {
-      translation 27.2359 23.3754 1
+      translation 27.4235 23.0106 1
       rotation 0 0 1 -1.0472
       name "tree(7)"
       locked FALSE
     }
     Tree {
-      translation -27.4415 -23.4828 1
+      translation -27.4422 -23.0212 1
       rotation 0 0 1 -1.0472
       name "tree(14)"
       locked FALSE
     }
     Tree {
-      translation -34.2779 -10.3518 1
+      translation -34.3397 -9.84462 1
       rotation 0 0 1 -1.0472
       name "tree(17)"
       locked FALSE
@@ -68,7 +68,7 @@ DEF Trees Group {
   ]
 }
 Car {
-  translation -29.9292 -16.4032 1.39
+  translation -29.9042 -16.4467 1.39
   rotation 0 0 1 0.523599
   name "ATRP"
   controller "<extern>"
@@ -81,7 +81,7 @@ Car {
   maxSteeringTorque 1000
   extensionSlot [
     GPS {
-      translation 0.03 0 0.32
+      translation 0.63 0.09 0.32
       accuracy 0.1
       noiseCorrelation 0.1
       resolution 0.6
@@ -257,7 +257,7 @@ Car {
   }
   type "propulsion"
   engineType "electric"
-  time0To100 25
+  time0To100 20
   maxVelocity 8
   engineMaxTorque 19.37
   engineMaxPower 800

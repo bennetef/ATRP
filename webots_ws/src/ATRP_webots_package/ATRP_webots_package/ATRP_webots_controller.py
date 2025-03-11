@@ -12,7 +12,7 @@ import json
 import sys
 import signal
 
-HOST = '141.83.207.191'
+HOST = '192.168.178.52'
 PORT = 2222
 
 status = "stop_notCalibrated"
